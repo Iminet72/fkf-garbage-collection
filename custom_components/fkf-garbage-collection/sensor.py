@@ -21,6 +21,7 @@ from .const import (
     DOMAIN,
     CALENDAR_NAME,
     CALENDAR_PLATFORM,
+    GARBAGE_TYPES,
     SENSOR_PLATFORM,
     URL,
 )
@@ -160,25 +161,16 @@ def dconverter(argument):
     }
     return switcher.get(argument)
 
-def gconverter(argument):
-    switcher = {
-      "Szelektív": "selective",
-      "Kommunális": "communal",
-      'Zöld': "green",
-      'Szelektív Kommunális': "communal_selective",
-      'Kommunális Szelektív': "communal_selective",
-      'Kommunális Zöld': "communal_green",
-      'Zöld Kommunális': "communal_green",
-      'Szelektív Zöld': "selective_green",
-      'Zöld Szelektív': "selective_green",
-      'Kommunális Szelektív Zöld': "communal_selective_green",
-      'Kommunális Zöld Szelektív': "communal_selective_green",
-      'Szelektív Kommunális Zöld': "communal_selective_green",
-      'Szelektív Zöld Kommunális': "communal_selective_green",
-      'Zöld Kommunális Szelektív': "communal_selective_green",
-      'Zöld Szelektív Kommunális': "communal_selective_green"
-    }
-    return switcher.get(argument)
+def _gconverter(argument):
+    gcode = ""
+
+    for g in GARBAGE_TYPES:
+        if g in argument:
+            if len(gcode) > 0:
+                gcode += "_"
+            gcode += g
+    return gcode
+
 
 def _getRomanDistrictFromZip(argument):
     district10 = int(argument[1:3])
@@ -330,16 +322,24 @@ async def async_get_fkfdata(self):
       s1 = fdata["ajax/budaorsResults"]
 
     if len(s1) > 0:
+
+      _LOGGER.debug("s1: " + s1)
+
       s = s1.replace("\n","").replace("\"","")
       s1 = re.sub(r'\s{2,}',' ',s)
       s = s1.replace("<div class=communal d-inline-block><i class=fas fa-trash fa-lg mr-2><","") \
             .replace("<div class=selective d-inline-block><i class=fas fa-trash fa-lg><","") \
+            .replace("<div class=bio d-inline-block><i class=fas fa-trash fa-lg mr-2><","") \
             .replace("<i class=fas fa-trash fa-lg mr-2><","") \
             .replace("<i class=fab fa-pagelines fa-lg mr-2 style=color:green;><","") \
             .replace("<div class=communal d-inline-block>","") \
             .replace("</div>","") \
             .replace("colspan=3><hr class=white m-0","") \
-            .replace("/i>","")
+            .replace("/i>","") \
+            .replace("Konyhai zöld- és élelmiszerhulladék","bio") \
+            .replace("Kommunális","communal") \
+            .replace("Szelektív","selective") \
+            .replace("Zöld","green")
 
       doc = lh.fromstring(s)
       tr_elements = doc.xpath('//tr')
@@ -356,7 +356,7 @@ async def async_get_fkfdata(self):
           b = datetime.strptime(gdate[i], date_format)
 
           if (b - a).days - self._offsetdays >= 0:
-            gtype = gconverter(garbage[i].strip())
+            gtype = _gconverter(garbage[i].strip())
             gdays = (b - a).days - self._offsetdays
             if gdays is None:
               gdays = -1
@@ -367,6 +367,9 @@ async def async_get_fkfdata(self):
 
             if "communal" in gtype and self._next_communal_days == None:
               self._next_communal_days = gdays
+
+            if "bio" in gtype and self._next_bio_days == None:
+              self._next_bio_days = gdays
 
             if self._green and self._next_green_days != None:
                 if gdays == green_day_diff:
@@ -406,6 +409,7 @@ class FKFGarbageCollectionSensor(Entity):
         self._current = "current"
         self._offsetdays = offsetdays
         self._icon = DEFAULT_ICON
+        self._next_bio_days = None
         self._next_communal_days = None
         self._next_green_days = None
         self._next_selective_days = None
@@ -461,6 +465,7 @@ class FKFGarbageCollectionSensor(Entity):
             i += 1
 
         self._attr["current"] = self._current
+        self._attr["next_bio_days"] = self._next_bio_days
         self._attr["next_communal_days"] = self._next_communal_days
         self._attr["next_green_days"] = self._next_green_days
         self._attr["next_selective_days"] = self._next_selective_days
@@ -479,6 +484,7 @@ class FKFGarbageCollectionSensor(Entity):
         )
 
     async def async_update(self):
+        self._next_bio_days = None
         self._next_communal_days = None
         self._next_green_days = None
         self._next_selective_days = None
@@ -489,6 +495,7 @@ class FKFGarbageCollectionSensor(Entity):
            self._fkfdata = fkfdata
            self._state = min(int(200 if self._next_communal_days is None else self._next_communal_days), \
                              int(200 if self._next_green_days is None else self._next_green_days), \
+                             int(200 if self._next_bio_days is None else self._next_bio_days), \
                              int(200 if self._next_selective_days is None else self._next_selective_days))
            if self._state == 200:
                self._state = "unknown"
