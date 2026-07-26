@@ -281,7 +281,10 @@ async def async_get_fkfdata(self):
     try:
         async with _session.get(url, timeout=HTTP_TIMEOUT) as response:
             r = await response.text()
-            cookie = response.headers['Set-Cookie']
+            cookie = response.headers.get('Set-Cookie')
+            if not cookie:
+                _LOGGER.error("FKF válaszban nincs Set-Cookie fejléc. Status: %s, headers: %s", response.status, dict(response.headers))
+                return None
     except (aiohttp.ContentTypeError, aiohttp.ServerDisconnectedError, aiohttp.client_exceptions.ClientConnectorError, asyncio.TimeoutError):
         _LOGGER.debug("Connection error to " + URL)
 
